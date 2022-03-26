@@ -10,8 +10,8 @@ namespace EchoServer
     {
         static void Main(string[] args)
         {
-            ProcessTcpServer();
-            // AsyncProcessTcpServer();
+            //ProcessTcpServer();
+             AsyncProcessTcpServer();
         }
 
         private static void ProcessTcpServer()
@@ -22,7 +22,10 @@ namespace EchoServer
             while(true)
             {
                 var client = tcpListener.AcceptTcpClient();
-                Task.Run(() => ProcessClient(client));
+                Task.Run(() =>
+                {
+                    ProcessClient(client);
+                });
             }
         }
 
@@ -39,7 +42,7 @@ namespace EchoServer
                     {
                         string line;
                         while((line = sr.ReadLine()) != null)
-                        {
+                        { 
                             sw.WriteLine(line);
                         }
                     }

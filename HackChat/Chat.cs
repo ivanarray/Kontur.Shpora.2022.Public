@@ -12,45 +12,54 @@ using System.Threading.Tasks;
 
 namespace HackChat
 {
-	public class Chat
-	{
-		public const int DefaultPort = 31337;
+    public class Chat
+    {
+        public const int DefaultPort = 31337;
 
-		private readonly byte[] PingMsg = new byte[1];
-		private readonly ConcurrentDictionary<IPEndPoint, (TcpClient Client, NetworkStream Stream)> OutboundConnections = new();
+        private readonly byte[] PingMsg = new byte[1];
 
-		private readonly int port;
-		private readonly TcpListener tcpListener;
+        private readonly ConcurrentDictionary<IPEndPoint, (TcpClient Client, NetworkStream Stream)>
+            OutboundConnections = new();
 
-		public Chat(int port) => tcpListener = new TcpListener(IPAddress.Any, this.port = port);
+        private readonly int port;
+        private readonly TcpListener tcpListener;
 
-		public void Start()
-		{
+        public Chat(int port) => tcpListener = new TcpListener(IPAddress.Any, this.port = port);
+
+        public void Start()
+        {
             tcpListener.Start(100500);
-			Task.Factory.StartNew(() =>
-			{
-				while(true)
-				{
-					var tcpClient = tcpListener.AcceptTcpClient();
-					ConsoleWriteLineAsync($"[{tcpClient.Client.RemoteEndPoint}] connected", ConsoleColor.Yellow);
-					Task.Run(() => ProcessInboundConnectionsAsync(tcpClient));
-				}
-			}, TaskCreationOptions.LongRunning);
+            Task.Factory.StartNew(() =>
+            {
+                while (true)
+                {
+                    var tcpClient = tcpListener.AcceptTcpClient();
+                    ConsoleWriteLineAsync($"[{tcpClient.Client.RemoteEndPoint}] connected", ConsoleColor.Yellow);
+                    Task.Run(() => ProcessInboundConnectionsAsync(tcpClient));
+                }
+            }, TaskCreationOptions.LongRunning);
 
-			Task.Factory.StartNew(DiscoverLoop, TaskCreationOptions.LongRunning);
+            Task.Factory.StartNew(DiscoverLoop, TaskCreationOptions.LongRunning);
 
-			Task.Factory.StartNew(() =>
-			{
-				string line;
-				while ((line = Console.ReadLine()) != null)
-					Task.Run(() => BroadcastAsync(line));
-			}, TaskCreationOptions.LongRunning);
-		}
+            Task.Factory.StartNew(() =>
+            {
+                string line;
+                while ((line = Console.ReadLine()) != null)
+                    Task.Run(() => BroadcastAsync(line));
+            }, TaskCreationOptions.LongRunning);
+        }
 
         private async Task ProcessInboundConnectionsAsync(TcpClient tcpClient)
         {
             EndPoint endpoint = null;
-            try { endpoint = tcpClient.Client.RemoteEndPoint; } catch { /* ignored */ }
+            try
+            {
+                endpoint = tcpClient.Client.RemoteEndPoint;
+            }
+            catch
+            {
+                /* ignored */
+            }
 
             try
             {
@@ -60,7 +69,11 @@ namespace HackChat
                     await ReadLinesToConsoleAsync(stream);
                 }
             }
-            catch { /* ignored */ }
+            catch
+            {
+                /* ignored */
+            }
+
             await ConsoleWriteLineAsync($"[{endpoint}] disconnected", ConsoleColor.DarkRed);
         }
 
@@ -69,32 +82,64 @@ namespace HackChat
             string line;
             using var sr = new StreamReader(stream);
             while ((line = await sr.ReadLineAsync()) != null)
-                await ConsoleWriteLineAsync($"[{((NetworkStream)stream).Socket.RemoteEndPoint}] {line}");
+                await ConsoleWriteLineAsync($"[{((NetworkStream) stream).Socket.RemoteEndPoint}] {line}");
         }
 
 
         private async void DiscoverLoop()
-		{
-			while(true)
-			{
-				try { await Discover(); } catch { /* ignored */ }
-				await Task.Delay(1000);
-			}
-		}
+        {
+            while (true)
+            {
+                try
+                {
+                    await Discover();
+                }
+                catch
+                {
+                    /* ignored */
+                }
+
+                await Task.Delay(1000);
+            }
+        }
 
         private async Task Discover()
-		{
-			OutboundConnections.Where(pair => !pair.Value.Client.Client.Connected).ForEach(pair =>
-			{
-				try { pair.Value.Client.Dispose(); } catch { /* ignored */ }
-				ConsoleWriteLineAsync($"[ME] disconnected from {pair.Key}", ConsoleColor.DarkRed).Wait();
-				OutboundConnections.TryRemove(pair);
-			});
+        {
+            OutboundConnections.Where(pair => !pair.Value.Client.Client.Connected).ForEach(pair =>
+            {
+                try
+                {
+                    pair.Value.Client.Dispose();
+                }
+                catch
+                {
+                    /* ignored */
+                }
+
+                ConsoleWriteLineAsync($"[ME] disconnected from {pair.Key}", ConsoleColor.DarkRed).Wait();
+                OutboundConnections.TryRemove(pair);
+            });
 
             var myAddresses = await GetMyAddresses();
-			var nearbyAddresses = await GetNearbyAddresses(myAddresses);
+            var nearbyAddresses = await GetNearbyAddresses(myAddresses);
 
-			throw new NotImplementedException();
+            nearbyAddresses.AsParallel().Select(async ip =>
+            {
+                var client = new TcpClient();
+                var ePoint = new IPEndPoint(ip, DefaultPort);
+                await client.ConnectAsync(ePoint);
+                return (ePoint, client);
+            }).ForAll(
+                async pair =>
+                {
+                    var p = await pair;
+                    if (p.client.Connected)
+                    {
+                        OutboundConnections.AddOrUpdate(p.ePoint, (p.client, p.client.GetStream()),
+                            (x, y) => y);
+                    }
+                });
+            
         }
 
         private async Task<IEnumerable<IPAddress>> GetNearbyAddresses(IPAddress[] myAddresses)
@@ -115,20 +160,20 @@ namespace HackChat
             var bytes = ip.GetAddressBytes();
             for (int i = 0; i < 256; i++)
             {
-                bytes[3] = (byte)i;
+                bytes[3] = (byte) i;
                 yield return new IPAddress(bytes);
             }
         }
 
-        
 
         private async Task BroadcastAsync(string message)
         {
-	        throw new NotImplementedException();
+            throw new NotImplementedException();
         }
 
 
         private SemaphoreSlim consoleSemaphore = new SemaphoreSlim(1, 1);
+
         private async Task ConsoleWriteLineAsync(string str, ConsoleColor color = ConsoleColor.Gray)
         {
             await consoleSemaphore.WaitAsync();
@@ -143,5 +188,5 @@ namespace HackChat
                 consoleSemaphore.Release();
             }
         }
-	}
+    }
 }
