@@ -155,14 +155,7 @@ namespace HackChat
 
         private IEnumerable<IPAddress> CalcNearbyIPAddresses(IPAddress ip)
         {
-            yield return IPAddress.Parse("127.0.0.1");
-            yield break;
-            var bytes = ip.GetAddressBytes();
-            for (int i = 0; i < 256; i++)
-            {
-                bytes[3] = (byte) i;
-                yield return new IPAddress(bytes);
-            }
+            throw new NotImplementedException();
         }
 
 
