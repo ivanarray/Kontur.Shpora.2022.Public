@@ -18,55 +18,50 @@ public class SmartClusterClient : ClusterClientBase
 
     public override async Task<string> ProcessRequestAsync(string query, TimeSpan timeout)
     {
-        var sw = new Stopwatch();
-        var mainSw = new Stopwatch();
-        mainSw.Start();
+        var localTimer = new Stopwatch();
+        var commonTimer = new Stopwatch();
+
+        commonTimer.Start();
+        
         var t = timeout / ReplicaAddresses.Length;
-        var tasksList = new List<Task<string>>(ReplicaAddresses.Length);
+        var tasksWaitingSet = new HashSet<Task<string>>(ReplicaAddresses.Length);
 
         for (var i = 0; i < ReplicaAddresses.Length; i++)
         {
-            if (TryGetSuccessTask(tasksList, out var result)) return await result;
+            var task = ProcessRequestAsync(CreateRequest($"{ReplicaAddresses[i]}?query={query}"));
+            
+            tasksWaitingSet.Add(task);
 
-            var uri = ReplicaAddresses[i];
-            var rst = CreateRequest($"{uri}?query={query}");
-            var task = ProcessRequestAsync(rst);
+            localTimer.Start();
+            await Task.WhenAny(Task.Delay(t), Task.WhenAny(tasksWaitingSet));
+            localTimer.Stop();
 
+            if (task.IsCompleted && !task.IsFaulted) return await task;
+            
+            t = (timeout - commonTimer.Elapsed) / Math.Max(1, ReplicaAddresses.Length - i - 1);
+            
+            if (task.IsFaulted)
+                tasksWaitingSet.Remove(task);
 
-            sw.Start();
-            await Task.WhenAny(Task.Delay(t), task);
-            sw.Stop();
-
-
-            if (!task.IsCompleted || task.IsFaulted)
-            {
-                t = (timeout - mainSw.Elapsed) / Math.Max(1, ReplicaAddresses.Length - i - 1);
-                if (!task.IsFaulted)
-                    tasksList.Add(task);
-
-                sw.Reset();
-                continue;
-            }
-
-            return await task;
+            localTimer.Reset();
         }
+        commonTimer.Stop();
 
-        mainSw.Stop();
-
-        var delta = timeout - mainSw.Elapsed;
+        var delta = timeout - commonTimer.Elapsed;
 
         if (delta > TimeSpan.Zero)
-            await Task.WhenAny(tasksList).WaitAsync(timeout - mainSw.Elapsed);
+            await Task.WhenAny(tasksWaitingSet).WaitAsync(timeout - commonTimer.Elapsed);
 
-        if (TryGetSuccessTask(tasksList, out var r)) return await r;
+        if (TryGetSuccessTask(tasksWaitingSet, out var r)) return await r;
+
         throw new TimeoutException();
     }
 
     protected override ILog Log => LogManager.GetLogger(typeof(SmartClusterClient));
 
-    private bool TryGetSuccessTask<T>(List<Task<T>> tasks, out Task<T> task)
+    private bool TryGetSuccessTask<T>(HashSet<Task<T>> tasks, out Task<T> task)
     {
-        var success = tasks.Where(t => t.IsCompletedSuccessfully).ToArray();
+        var success = tasks.Where(t => t.IsCompleted).ToArray();
 
         if (success.Any())
         {
